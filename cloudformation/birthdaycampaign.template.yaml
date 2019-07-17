@@ -69,7 +69,7 @@ Resources:
 
             var today = new Date();
 
-            val birthdaysToday = Object.keys(event.Endpoints)
+            var birthdaysToday = Object.keys(event.Endpoints)
               .filter(endpointId => {
                 var bday = new Date(event.Endpoints[endpointId].User.UserAttributes.Birthdate);
                 return bday.getMonth() === today.getMonth() && bday.getDay() === today.getDay();

@@ -93,30 +93,55 @@ To upload the zip deployment packages:
 
 #### Step 4: Launch the AWS CloudFormation template
 
-Now we can launch the AWS CloudFormation template that sets up the backend components that power this solution.
+Now we can launch the AWS CloudFormation template that sets up the backend components that power this solution.  The AWS CloudFormation Template **salesforcedemo.template.yaml** can be found in the **cloudformation** folder of this git repostiory.
 
 To launch the AWS CloudFormation template:
 
 1. Sign in to the AWS Management Console, and then open the AWS CloudFormation console at https://console.aws.amazon.com/cloudformation/home.
-2. Choose *Create new stack*.
-3. Next to *Choose a template*, choose *Specify an Amazon S3 template URL*, and then paste the following URL: https://s3.amazonaws.com/mattd-customer-share/twitterdemo.template.yaml. Choose *Next*.
-4. Under *Specify Details*, for *Stack Name*, type a name for the CloudFormation stack.
-5. Under *Parameters*, do the following:
-    1. For *SalesforceUsername*, type your Salesforce API User username.
-    2. For *SalesforcePassword*, type your Salesforce API User password.
-    3. For *KeyName*, type the Amazon EC2 Key Pair key name of an existing key pair.
-    4. For *S3DeploymentBucket*, type Amazon S3 deployment bucket created in Step 3.
-    5. For *S3KeyLambda1*, type the Amazon S3 key for salesforce-crm-update-pinpoint.zip.
-    6. For *S3KeyLambda2*, type the Amazon S3 key for pinpoint-engagement-update-salesforce.zip.
-6. Choose *Next*.
-7. On the next page, review your settings, and then choose *Next* again. On the final page, select the box to indicate that you understand that AWS CloudFormation will create IAM resources, and then choose *Create*.
+2. Choose **Create stack**.
+3. Next to **Specify template**, choose **Upload a template file**, and then choose **Choose file** to upload the **salesforcedemo.template.yaml** template file. Choose **Next**.
+4. Under **Specify stack details**, for **Stack Name**, type a name for the CloudFormation stack.
+5. Under **Parameters**, do the following:
+    1. For **SalesforceUsername**, type your Salesforce API User username.
+    2. For **SalesforcePassword**, type your Salesforce API User password.
+    3. For **KeyName**, type the Amazon EC2 Key Pair key name of an existing key pair.
+    4. For **S3DeploymentBucket**, type Amazon S3 deployment bucket created in Step 3.
+    5. For **S3KeyLambda1**, type the Amazon S3 key for salesforce-crm-update-pinpoint.zip.
+    6. For **S3KeyLambda2**, type the Amazon S3 key for pinpoint-engagement-update-salesforce.zip.
+6. Choose **Next**.
+7. On the next page, review your settings, and then choose **Next** again. On the final page, select the box to indicate that you understand that AWS CloudFormation will create IAM resources, and then choose **Create**.
 
-When you choose *Create*, AWS CloudFormation creates the all of the backend components for the application. These include a Pinpoint Application, an EC2 instance, two Kinesis data streams, a Kinesis Firehose delivery stream, an S3 bucket, and two Lambda functions. This process takes about 10 minutes to complete.
+When you choose **Create**, AWS CloudFormation creates the all of the backend components for the application. These include a Pinpoint Application, an EC2 instance, two Kinesis data streams, a Kinesis Firehose delivery stream, an S3 bucket, and two Lambda functions. This process takes about 10 minutes to complete.
 
 #### Step 5. Test the Salesforce CRM to Amazon Pinpoint Endpoint Connection
 
 
+#### Step 6. Test the Amazon Pinpoint Engagement Update to Salesforce CRM
 
+
+#### Step 7. Take it to the next level - Create a Happy Birthday Email Campaign
+
+Now that we are syncing Contact data from Salesforce CRM to Amazon Pinpoint, we can use this data to power all kinds of marketing campaigns. A very simple campaign we will setup now is a Happy Birthday email campaign using the Birthdate field in Salesforce CRM.  We will launch a Daily recurring Pinpoint Campaign that will utilize an AWS Lambda function to filter down our Endpoints to find only those with Today as their Birthday using a Pinpoint Campaign Server Extension.  All of these components have been packaged into the AWS CloudFormation template **birthdaycampaign.template.yaml** file found in the **cloudformation** folder of this git repository.
+
+To launch the AWS CloudFormation template:
+
+1. Sign in to the AWS Management Console, and then open the AWS CloudFormation console at https://console.aws.amazon.com/cloudformation/home.
+2. Choose **Create stack**.
+3. Next to **Specify template**, choose **Upload a template file**, and then choose **Choose file** to upload the **birthdaycampaign.template.yaml** template file. Choose **Next**.
+4. Under **Specify stack details**, for **Stack Name**, type a name for the CloudFormation stack.
+5. Under **Parameters**, do the following:
+    1. For **ApplicationId**, type your Pinpoint Application Id that was created in Step 4 to resuse the same Pinpoint Application.
+    2. For **CampaignEndTime**, type the Date and Time that you would like this Campaign to end in UTC. Ex: 2025-07-20T15:53:00
+    3. For **CampaignStartTime**, type the Date and Time that you would like this Campaign to start in UTC. Ex: 2025-07-20T15:53:00
+6. Choose **Next**.
+7. On the next page, review your settings, and then choose **Next** again. On the final page, select the box to indicate that you understand that AWS CloudFormation will create IAM resources, and then choose **Create**.
+
+When you choose **Create**, AWS CloudFormation creates the all of the backend components for the application. These include a Pinpoint Segment of ALL Endpoints, a Pinpoint Campaign that will run Daily, and two Lambda functions. This process takes about 5 minutes to complete.
+
+
+
+
+## OLD INFO BELOW ##
 #### Step 6: Create an Amazon Pinpoint campaign
 
 ~~In the real world, you probably don't want to send messages to users immediately after they send tweets to your Twitter handle—if you did, you might seem too aggressive, and your customers might hesitate to engage with your brand in the future.~~
