@@ -1,0 +1,14 @@
+{
+  "name": "pinpoint-engagement-update-salesforce",
+  "version": "0.0.1",
+  "description": "Example NodeJS code to update Salesforce CRM from Pinpoint Event Stream data",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "jsforce": "^1.9.1"
+  }
+}

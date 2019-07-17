@@ -1,0 +1,10 @@
+{
+  "name": "salesforce-crm-update-pinpoint",
+  "version": "0.0.1",
+  "description": "Example to update Pinpoint Endpoints from Salesforce CRM Contact Streaming API",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {}
+}

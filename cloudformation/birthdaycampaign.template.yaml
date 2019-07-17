@@ -1,0 +1,196 @@
+AWSTemplateFormatVersion: 2010-09-09
+Parameters:
+  ApplicationId:
+    Type: String
+    Description: Your Pinpoint Application ID
+  CampaignStartTime:
+    Type: String
+    Description: 'Date and Time of when the Campaign should Start in UTC.  Ex: 2019-07-20T15:53:00'
+  CampaignEndTime:
+    Type: String
+    Description: 'Date and Time of when the Campaign should End in UTC.  Ex: 2025-07-20T15:53:00'
+Resources:
+  LambdaRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: LambdaPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'mobiletargeting:*'
+                Resource: '*'
+        - PolicyName: LambdaCreateLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:*
+                Resource: arn:aws:logs:*:*:*
+  PinpointAllSegment:
+    Type: 'AWS::Pinpoint::Segment'
+    Properties:
+      ApplicationId: !Ref ApplicationId
+      Name: 'All Endpoints'
+      SegmentGroups:
+        Include: 'ANY'
+        Groups:
+          - Type: 'ANY'
+            SourceType: 'ANY'
+  LambdaPermission:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !GetAtt LambdaFunction.Arn
+      Principal: !Sub 'pinpoint.${AWS::Region}.amazonaws.com'
+      SourceArn: !Sub 'arn:aws:mobiletargeting:${AWS::Region}:${AWS::AccountId}:/apps/*'
+  LambdaFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Environment:
+        Variables:
+          PINPOINT_APPLICATION_ID: !Ref ApplicationId
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => {
+            console.log(JSON.stringify(event));
+
+            var today = new Date();
+
+            val birthdaysToday = Object.keys(event.Endpoints)
+              .filter(endpointId => {
+                var bday = new Date(event.Endpoints[endpointId].User.UserAttributes.Birthdate);
+                return bday.getMonth() === today.getMonth() && bday.getDay() === today.getDay();
+              })
+              .reduce((filtered, endpointId) => {
+                filtered[endpointId] = event.Endpoints[endpointId];
+                return filtered;
+              }, {});
+
+              console.log('Found ' + Object.keys(birthdaysToday).length + ' Endpoints with Birthday Today!');
+              return birthdaysToday;
+          };
+      Handler: index.handler
+      Role: !GetAtt LambdaRole.Arn
+      Runtime: nodejs8.10
+  PinpointBirthdayCampaign:
+    Type: AWS::Pinpoint::Campaign
+    Properties:
+      ApplicationId: !Ref ApplicationId
+      CampaignHook:
+        LambdaFunctionName: !GetAtt LambdaFunction.Arn
+        Mode: 'FILTER'
+      Description: 'Sends a Happy Birthday Email using Salesforce CRM Birthday Data.'
+      IsPaused: true
+      MessageConfiguration:
+        EmailMessage:
+          Body: 'Happy Birthday from Pinpoint!'
+          HtmlBody: '<p>Happy Birthday from Pinpoint!</p>'
+          Title: 'Happy Birthday!'
+      Name: 'Salesforce Demo Happy Birthday Email'
+      Schedule:
+        Frequency: 'DAILY'
+        IsLocalTime: false
+        StartTime: !Ref CampaignStartTime
+        EndTime: !Ref CampaignEndTime
+      SegmentId: !GetAtt PinpointAllSegment.SegmentId
+    DependsOn: LambdaPermission
+  LambdaCleanupFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Environment:
+        Variables:
+          PINPOINT_APPLICATION_ID: !Ref ApplicationId
+          CAMPAIGN_ID: !GetAtt PinpointBirthdayCampaign.CampaignId
+          LAMBDA_ARN: !GetAtt LambdaFunction.Arn
+      Code:
+        ZipFile: |
+          var AWS = require('aws-sdk');
+          AWS.config.update({
+            region: process.env.AWS_REGION
+          });
+          exports.handler = async (event, context) => {
+
+            var pinpoint = new AWS.Pinpoint();
+            var params = {
+              ApplicationId: process.env.PINPOINT_APPLICATION_ID,
+              CampaignId: process.env.CAMPAIGN_ID,
+              WriteCampaignRequest: {
+                Hook: {
+                  LambdaFunctionName: process.env.LAMBDA_ARN,
+                  Mode: 'FILTER'
+                },
+              }
+            };
+            return pinpoint.updateCampaign(params).promise().then(() => {
+              return sendResponse(event, context, 'SUCCESS', {});
+            });
+          };
+
+          function sendResponse(event, context, responseStatus, responseData, physicalResourceId) {
+
+            return new Promise((resolve, reject) => {
+
+              var responseBody = JSON.stringify({
+                          Status: responseStatus,
+                          Reason: "See the details in CloudWatch Log Stream: " + context.logStreamName,
+                          PhysicalResourceId: physicalResourceId || context.logStreamName,
+                          StackId: event.StackId,
+                          RequestId: event.RequestId,
+                          LogicalResourceId: event.LogicalResourceId,
+                          Data: responseData
+              });
+
+              console.log("Response body:\n", responseBody);
+
+              var https = require("https");
+              var url = require("url");
+
+              var parsedUrl = url.parse(event.ResponseURL);
+              var options = {
+                          hostname: parsedUrl.hostname,
+                          port: 443,
+                          path: parsedUrl.path,
+                          method: "PUT",
+                          headers: {
+                            "content-type": "",
+                            "content-length": responseBody.length
+                          }
+              };
+
+              var request = https.request(options, function(response) {
+                          console.log("Status code: " + response.statusCode);
+                          console.log("Status message: " + response.statusMessage);
+                          resolve(context.done());
+              });
+
+              request.on("error", function(error) {
+                        console.log("send(..) failed executing https.request(..): " + error);
+                        reject(context.done(error));
+            	});
+
+            	request.write(responseBody);
+            	request.end();
+            });
+          };
+      Handler: index.handler
+      Role: !GetAtt LambdaRole.Arn
+      Runtime: nodejs8.10
+    DependsOn: PinpointBirthdayCampaign
+  LambdaCleanupExecution:
+    Type: 'Custom::LambdaCleanup'
+    Properties:
+      ServiceToken: !GetAtt LambdaCleanupFunction.Arn
+      Region: !Ref 'AWS::Region'

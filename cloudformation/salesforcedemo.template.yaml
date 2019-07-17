@@ -1,0 +1,413 @@
+AWSTemplateFormatVersion: 2010-09-09
+Parameters:
+  SalesforceUsername:
+    Type: String
+    Description: Your Salesforce API User Username
+  SalesforcePassword:
+    Type: String
+    Description: Your Salesforce API User Password
+  KeyName:
+    Type: String
+    Description: Name of an existing EC2 keypair for SSH Login.
+  S3DeploymentBucket:
+    Type: String
+    Description: Name of the Amazon S3 bucket used to upload the zip files
+  S3KeyLambda1:
+    Type: String
+    Description: Amazon S3 key of the salesforce-crm-update-pinpoint.zip file.  Try "salesforce-crm-update-pinpoint.zip"
+  S3KeyLambda2:
+    Type: String
+    Description: Amazon S3 key of the pinpoint-engagement-update-salesforce.zip file.  Try "pinpoint-engagement-update-salesforce.zip"
+Resources:
+  VPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      CidrBlock: 10.0.0.0/16
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 0846dba2-69a7-4ab3-950c-5108200b5054
+  InternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 2d1dcf5f-947d-4134-b448-5d8da2afa32d
+  InternetGatewayAttachment:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 56cb370a-50d9-4a42-b8ac-8a94ede05634
+  PublicRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 0ab34f57-12c0-4b86-8a45-f0ca4ca8179d
+  DefaultPublicRoute:
+    Type: 'AWS::EC2::Route'
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 38ce8e4b-0f4b-4e93-93cd-1971310191e1
+  PublicSubnet1RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetOne
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 0e617a31-3a03-4489-a50a-16f2909f9830
+  PublicSubnetOne:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone:
+        'Fn::Select':
+          - 0
+          - 'Fn::GetAZs':
+              Ref: 'AWS::Region'
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.0.0/24
+      MapPublicIpOnLaunch: true
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 3d9d01d8-4c15-4e9e-91ad-b459a6630cc7
+  SecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: allow SSH from anywhere
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 010132c0-068b-4449-bc58-a9ef64d22cfb
+  FirehoseDeliveryRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - firehose.amazonaws.com
+                - s3.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: FirehoseESPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:AbortMultipartUpload'
+                  - 's3:GetBucketLocation'
+                  - 's3:GetObject'
+                  - 's3:ListBucket'
+                  - 's3:ListBucketMultipartUploads'
+                  - 's3:PutObject'
+                Resource:
+                  - !Join
+                    - ''
+                    - - 'arn:aws:s3:::'
+                      - !Ref S3Bucket
+                  - !Join
+                    - ''
+                    - - 'arn:aws:s3:::'
+                      - !Ref S3Bucket
+                      - /*
+              - Effect: Allow
+                Action:
+                  - 'kinesis:DescribeStream'
+                  - 'kinesis:GetShardIterator'
+                  - 'kinesis:GetRecords'
+                Resource: !GetAtt KinesisStream2.Arn
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: bb219b44-fb2f-422f-8824-d1ba05a7137e
+  PinpointStreamRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - "firehose.amazonaws.com"
+                - "lambda.amazonaws.com"
+                - "s3.amazonaws.com"
+                - "pinpoint.amazonaws.com"
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: pinpoint-export-to-kinesis
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'kinesis:PutRecords'
+                  - 'kinesis:DescribeStream'
+                Resource: !GetAtt KinesisStream2.Arn
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 2dafbb64-b70c-4611-b7b6-d2cbb802b3a5
+  LambdaRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: LambdaPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'mobiletargeting:*'
+                  - 'kinesis:Get*'
+                  - 'kinesis:List*'
+                  - 'kinesis:Describe*'
+                Resource: '*'
+        - PolicyName: LambdaCreateLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:*
+                Resource: arn:aws:logs:*:*:*
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: bda4f9b8-b835-4d3b-925a-b7ed5d7eb450
+  EC2Role:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: kinesis-put-record
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'kinesis:PutRecord'
+                  - 'kinesis:PutRecords'
+                  - 'kinesis:DescribeStream'
+                Resource: !GetAtt KinesisStream1.Arn
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 40801872-7a41-4215-9030-939cca439ea1
+  PinpointApplication:
+    Type: 'AWS::Pinpoint::App'
+    Properties:
+      Name: 'Salesforce Pinpoint Demo Application'
+  EC2InstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      Path: /
+      Roles:
+        - !Ref EC2Role
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 0b316b74-c28f-4cd6-bb91-dcf0cacd0165
+  EC2Instance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      ImageId: ami-082b5a644766e0e6f
+      InstanceType: t2.micro
+      KeyName: !Ref KeyName
+      SubnetId: !Ref PublicSubnetOne
+      SecurityGroupIds:
+        - !Ref SecurityGroup
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      UserData:
+        'Fn::Base64': !Sub |
+          #!/bin/bash
+          REGION=`curl http://169.254.169.254/latest/dynamic/instance-identity/document|grep region|awk -F\" '{print $4}'`
+          echo $REGION
+          cat > /home/ec2-user/setup.sh << EOF
+          # START ec2-user USERSPACE
+          echo "Setting up NodeJS Environment"
+          curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.34.0/install.sh | bash
+          echo 'export NVM_DIR="/home/ec2-user/.nvm"' >> /home/ec2-user/.bashrc
+          echo '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"  # This loads nvm' >> /home/ec2-user/.bashrc
+          # Dot source the files to ensure that variables are available within the current shell
+          . /home/ec2-user/.nvm/nvm.sh
+          . /home/ec2-user/.profile
+          . /home/ec2-user/.bashrc
+          # Install NVM, NPM, Node.JS & Dependencies
+          nvm install 10.16.0
+          npm install jsforce
+          npm install aws-sdk
+          EOF
+
+          chown ec2-user:ec2-user /home/ec2-user/setup.sh && chmod a+x /home/ec2-user/setup.sh
+          sleep 1; su - ec2-user -c "/home/ec2-user/setup.sh"
+
+
+          cat > /home/ec2-user/producer.js << EOF
+          var AWS = require('aws-sdk');
+          var jsforce = require('jsforce');
+
+          var username = '${SalesforceUsername}';
+          var password = '${SalesforcePassword}';
+
+          AWS.config.update({region: '$REGION'});
+          var kinesis = new AWS.Kinesis();
+          var conn = new jsforce.Connection();
+
+          conn.login(username, password, function(err, res) {
+            if (err) { return console.error(err); }
+
+            conn.streaming.topic('ContactUpdates').subscribe(function(message) {
+
+              var params = {
+                Data: Buffer.from(JSON.stringify(message.sobject)),
+                PartitionKey: message.sobject.Id,
+                StreamName: 'salesforce-updates'
+              };
+              return kinesis.putRecord(params).promise()
+                .then((data) => {
+                  console.log("Message Sent");
+                })
+                .catch((err) => {
+                  console.error(err, err.stack);
+                });
+            });
+          });
+          EOF
+
+          chown ec2-user:ec2-user /home/ec2-user/producer.js
+          sleep 1; su - ec2-user -c "/home/ec2-user/.nvm/versions/node/v10.16.0/bin/node /home/ec2-user/producer.js &"
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 60ec8069-3998-4f3a-8362-e2c64eba45af
+  KinesisStream1:
+    Type: 'AWS::Kinesis::Stream'
+    Properties:
+      Name: salesforce-updates
+      ShardCount: 1
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 1eed5f3f-d17c-432b-9a70-0eeb2962aea7
+  KinesisStream2:
+    Type: 'AWS::Kinesis::Stream'
+    Properties:
+      Name: pinpoint-event-stream
+      ShardCount: 1
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 4157705b-fcb6-41fd-9f9e-d440baa0c240
+  PinpointEventStream:
+    Type: 'AWS::Pinpoint::EventStream'
+    Properties:
+      ApplicationId: !Ref PinpointApplication
+      DestinationStreamArn: !GetAtt KinesisStream2.Arn
+      RoleArn: !GetAtt PinpointStreamRole.Arn
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: ac179495-de95-40ee-90fb-3a9b9da5e33c
+  KinesisFirehose:
+    Type: 'AWS::KinesisFirehose::DeliveryStream'
+    Properties:
+      DeliveryStreamType: KinesisStreamAsSource
+      KinesisStreamSourceConfiguration:
+        KinesisStreamARN: !GetAtt KinesisStream2.Arn
+        RoleARN: !GetAtt FirehoseDeliveryRole.Arn
+      S3DestinationConfiguration:
+        BucketARN: !GetAtt S3Bucket.Arn
+        CompressionFormat: UNCOMPRESSED
+        BufferingHints:
+          IntervalInSeconds: 500
+          SizeInMBs: 5
+        RoleARN: !GetAtt FirehoseDeliveryRole.Arn
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 210a1d63-7137-4c0a-b3d4-e72f07fd6683
+  S3Bucket:
+    Type: 'AWS::S3::Bucket'
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 7e273730-e1cf-465f-864f-b49173e264c9
+  LambdaFunction1:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Environment:
+        Variables:
+          PINPOINT_APPLICATION_ID: !Ref PinpointApplication
+      Code:
+        S3Bucket: !Ref S3DeploymentBucket
+        S3Key: !Ref S3KeyLambda1
+      Handler: index.handler
+      Role: !GetAtt LambdaRole.Arn
+      Runtime: nodejs8.10
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 784cff63-5310-42d5-b62f-cca6d390a365
+  LambdaFunction2:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Environment:
+        Variables:
+          SALESFORCE_PASSWORD: !Ref SalesforceUsername
+          SALESFORCE_USERNAME: !Ref SalesforcePassword
+      Code:
+        S3Bucket: !Ref S3DeploymentBucket
+        S3Key: !Ref S3KeyLambda2
+      Handler: index.handler
+      Role: !GetAtt LambdaRole.Arn
+      Runtime: nodejs8.10
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: d1acd2a4-f699-4c6c-9d9e-62f0ab041650
+  LambdaTrigger1:
+    Type: 'AWS::Lambda::EventSourceMapping'
+    Properties:
+      BatchSize: 100
+      Enabled: true
+      EventSourceArn: !GetAtt KinesisStream1.Arn
+      FunctionName: !GetAtt LambdaFunction1.Arn
+      StartingPosition: LATEST
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: eb2e94d8-f2d3-4309-a7c3-b64a041b10a2
+  LambdaTrigger2:
+    Type: 'AWS::Lambda::EventSourceMapping'
+    Properties:
+      BatchSize: 100
+      Enabled: true
+      EventSourceArn: !GetAtt KinesisStream2.Arn
+      FunctionName: !GetAtt LambdaFunction2.Arn
+      StartingPosition: LATEST
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 09e5bb26-44be-4216-b90b-9ed7417cd783
