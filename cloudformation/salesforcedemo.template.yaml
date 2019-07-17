@@ -378,8 +378,8 @@ Resources:
     Properties:
       Environment:
         Variables:
-          SALESFORCE_PASSWORD: !Ref SalesforceUsername
-          SALESFORCE_USERNAME: !Ref SalesforcePassword
+          SALESFORCE_PASSWORD: !Ref SalesforcePassword
+          SALESFORCE_USERNAME: !Ref SalesforceUsername
       Code:
         S3Bucket: !Ref S3DeploymentBucket
         S3Key: !Ref S3KeyLambda2
