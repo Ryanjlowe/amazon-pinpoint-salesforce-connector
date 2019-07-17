@@ -36,7 +36,8 @@ The first step is to setup the target Salesforce CRM organization to start strea
 1. Log into your Salesforce instance and open the Developer Console
 2. Click **Debug | Open Execute Anonymous Window**
 3. In the Enter Apex Code window, paste the following Apex code, and click **Execute**
-``PushTopic pushTopic = new PushTopic();
+
+```PushTopic pushTopic = new PushTopic();
 pushTopic.Name = 'ContactUpdates';
 pushTopic.Query = 'SELECT Id, Name, Email, MobilePhone, Birthdate FROM Contact';
 pushTopic.ApiVersion = 46.0;
@@ -45,7 +46,8 @@ pushTopic.NotifyForOperationUpdate = true;
 pushTopic.NotifyForOperationUndelete = true;
 pushTopic.NotifyForOperationDelete = true;
 pushTopic.NotifyForFields = 'Referenced';
-insert pushTopic;``
+insert pushTopic;
+```
 
 ![Screenshot](images/pushtopic.png)
 
