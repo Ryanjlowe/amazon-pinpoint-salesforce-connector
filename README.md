@@ -13,6 +13,31 @@ Keeping your Marketing and Sales data in sync with each other allows both organi
 ## Architecture
 ![Screenshot](images/arch.png)
 
+## Repository content
+Main files:
+```bash
+.
+├── README.MD                                           <-- This instructions file
+├── cloudformation                                      <-- Folder for the AWS CloudFormation Templates
+│   └── salesforcedemo.template.yaml                    <-- AWS CloudFormation Template to setup the sync
+│   └── ec2-userdata.sh                                 <-- User Data script to connect to the Salesforce Streaming API
+│   └── birthdaycampaign.template.yaml                  <-- AWS CloudFormation Template for the Happy Birthday Campaign
+├── lambdas                                             <-- Folder for the AWS Lambda Function code
+│   └── salesforce-crm-update-pinpoint                  <-- Folder for Amazon Pinpoint Update Code
+│       └── index.js                                    <-- AWS Lambda Function code to update Amazon Pinpoint Endpoints
+│       └── package.json                                <-- NPM Package manifest
+│       └── salesforce-crm-update-pinpoint.zip          <-- Pre-packaged AWS Lambda code with dependencies
+│   └── pinpoint-engagement-update-salesforce           <-- Folder for Salesforce Update Code
+│       └── index.js                                    <-- AWS Lambda function code to update Salesforce Contact Objects
+│       └── package.json                                <-- NPM Package manifest
+│       └── pinpoint-engagement-update-salesforce.zip   <-- Pre-packaged AWS Lambda code with dependencies
+│   └── pinpoint-birthday-segment-filter                <-- Folder for Custom Amazon Pinpoint Segment Filter
+│       └── index.js                                    <-- AWS Lambda function code to filter for birthdays today
+├── salesforce-stream-producer                          <-- Folder for the EC2 code to connect to the Salesforce Streaming API
+│   └── producer.js                                     <-- Node code for the Salesforce Streaming API
+```
+
+
 ## Prerequisites
 
 You need the following:
@@ -82,6 +107,13 @@ When finished, it should look similar to this:
 
 The AWS Lambda functions utilize the [JSforce](https://jsforce.github.io/) JavaScript Library to connect to Salesforce to read the Streaming API and make Contact Object updates.  This dependency requires us to deploy our AWS Lambda functions in a packaged zip.  Fully functional zip packages are already provided, but need to be deployed into Amazon S3 in order for the CloudFormation template to run properly.
 
+*Optional*, the full zip file deployment packages are included in this git repository, however, to create your own packages follow these steps:
+
+1. Open the */lambdas/pinpoint-engagement-update-salesforce* folder
+2. Run *npm --install* to automatically create a *node_modules* folder and download all needed dependencies
+3. Package the the folder contents into a zip file.  Ex: *zip -r package.zip .*
+4. Repeat for the */lambdas/salesforce-crm-update-pinpoint* folder
+
 To upload the zip deployment packages:
 
 1. Sign in to the AWS Management Console, and then open the Amazon S3 console at https://s3.console.aws.amazon.com/s3/home.
@@ -105,7 +137,7 @@ To launch the AWS CloudFormation template:
 4. Under **Specify stack details**, for **Stack Name**, type a name for the CloudFormation stack.
 5. Under **Parameters**, do the following:
     1. For **SalesforceUsername**, type your Salesforce API User username.
-    2. For **SalesforcePassword**, type your Salesforce API User password.
+    2. For **SalesforcePassword**, type your Salesforce API User password - note, depending on your settings, a [Salesforce Security Token](https://help.salesforce.com/articleView?id=user_security_token.htm&type=5) may be required.
     3. For **KeyName**, type the Amazon EC2 Key Pair key name of an existing key pair.
     4. For **S3DeploymentBucket**, type Amazon S3 deployment bucket created in Step 3.
     5. For **S3KeyLambda1**, type the Amazon S3 key for salesforce-crm-update-pinpoint.zip.
@@ -117,13 +149,69 @@ When you choose **Create**, AWS CloudFormation creates the all of the backend co
 
 #### Step 5. Test the Salesforce CRM to Amazon Pinpoint Endpoint Connection
 
+At this point, there will be an EC2 instance listening to Salesforce Contact updates on the Salesforce Streaming API.  As changes happen, in real time, the EC2 code will capture the event and pass it to the Amazon Kinesis Stream.  The **salesforce-crm-update-pinpoint** AWS Lambda code will then execute and write the Salesforce Contact object into Pinpoint using Endpoint and User data.  The UserId of the Endpoint data will be the Salesforce CRM Contact Id.  In this way, the Email and MobilePhone endpoints will be tied back to the same user.  The Name and Birthdate fields will be written as custom User Attributes that can be used for segmentation and personalization of messages.
+
+To test the connection, first we need to create a new Contact in Salesforce.
+
+1. Log into your Salesforce instance.
+2. Choose **Contacts** from the navigation menu.
+3. On the Contacts page Choose **New**.
+4. Fill out the **New Contact** form ensuring to fill in all Required Fields, the **Mobile** and **Email** fields, as well as the **Birthdate** field for Step 7 below.
+5. Choose **Save**
+
+To verify the Endpoints were created for both the email and mobile phone fields:
+
+1. Log in to the AWS console, and then open the Amazon Pinpoint console at https://console.aws.amazon.com/pinpoint/home/.
+2. From the **All Projects** menu, choose **Salesforce Pinpoint Demo Application**.
+3. The **Applications analytics** should now display **2** under **New endpoints**.
 
 #### Step 6. Test the Amazon Pinpoint Engagement Update to Salesforce CRM
+
+Now that we have verified that Salesforce CRM updates are syncing into Amazon Pinpoint in realtime, we need to verify that Pinpoint engagement data is syncing back to Salesforce CRM. To do this, we need to enable the Email channel in the **Salesforce Pinpoint Demo Application**.
+
+To enable the Email Channel:
+
+1. In the navigation pane, choose **Settings** while still on the **Salesforce Pinpoint Demo Application** in Amazon Pinpoint.
+2. Under **Email** choose **Manage**.
+3. Under **Identity details** choose **Edit**.
+4. Check the box **Enable the email channel for this project**.
+    1. Choose **Verify a new email address**.
+    2. Enter an email address that you have access to in the **Email address** field.
+    3. Choose **Verify email address**
+    4. Check your email for a verification email and follow the instructions.
+    5. Choose **Save**
+5. Take note of the **Sending Restrictions** information.  If it says **In sandbox** then you will only be able to send emails to email addresses you verified in the steps above. If this is the case, ensure that your Salesforce Contact uses this email address or the send will fail.
+
+To execute an email campaign:
+
+1. In the navigation pane, choose **Campaigns** while still on the **Salesforce Pinpoint Demo Application** in Amazon Pinpoint.
+2. Choose **Create a campaign**.
+3. For **Campaign name**, type a name for the campaign, and then choose **Next**.
+4. On the **Segment** page, do the following
+    1. Choose **Create a segment**.
+    2. For **Name your segment to reuse it later**, type a name for the segment.
+    3. Note that under **Segment Estimate** ensure that it lists **2 endpoints**.
+    4. Leave the other settings as default and choose **Next**.
+    5. Choose **I understand** on the pop-up menu warning.
+5. On the **Create your message** page, ensure **Email** is chosen and type the message that you want to send, and then choose **Next**.
+6. On the **Schedule** page, choose **At a specific time** and **Immediately** and then choose **Next**.
+7. Verify that you receive your message in your email inbox.
+
+To verify that the Amazon Pinpoint engagement data makes it back to the Salesforce Contact record:
+
+1. Wait a few moments for the events in the Kinesis Event Stream to be fully processed by the AWS Lambda function.
+2. Log into your Salesforce instance.
+3. Choose **Contacts** from the navigation menu.
+4. Find and open your test Contact record.
+5. Click **Details** to view the Contact record field details.
+6. Verify that the **Pinpoint Last Email Sent** field has been updated!
 
 
 #### Step 7. Take it to the next level - Create a Happy Birthday Email Campaign
 
 Now that we are syncing Contact data from Salesforce CRM to Amazon Pinpoint, we can use this data to power all kinds of marketing campaigns. A very simple campaign we will setup now is a Happy Birthday email campaign using the Birthdate field in Salesforce CRM.  We will launch a Daily recurring Pinpoint Campaign that will utilize an AWS Lambda function to filter down our Endpoints to find only those with Today as their Birthday using a Pinpoint Campaign Server Extension.  All of these components have been packaged into the AWS CloudFormation template **birthdaycampaign.template.yaml** file found in the **cloudformation** folder of this git repository.
+
+*Note* the AWS Lambda code found in */lambdas/pinpoint-birthday-segment-filter* is only a handful of lines long and does not require any third party dependencies, so the full source is included in the AWS CloudFormation template and does not require an AWS Lambda deployment package to be uploaded to S3 like Step 3 above.
 
 To launch the AWS CloudFormation template:
 
@@ -132,7 +220,7 @@ To launch the AWS CloudFormation template:
 3. Next to **Specify template**, choose **Upload a template file**, and then choose **Choose file** to upload the **birthdaycampaign.template.yaml** template file. Choose **Next**.
 4. Under **Specify stack details**, for **Stack Name**, type a name for the CloudFormation stack.
 5. Under **Parameters**, do the following:
-    1. For **ApplicationId**, type your Pinpoint Application Id that was created in Step 4 to resuse the same Pinpoint Application.
+    1. For **ApplicationId**, type your Pinpoint Application Id that was created in Step 4 to reuse the same Pinpoint Application.
     2. For **CampaignEndTime**, type the Date and Time that you would like this Campaign to end in UTC. Ex: 2025-07-20T15:53:00
     3. For **CampaignStartTime**, type the Date and Time that you would like this Campaign to start in UTC. Ex: 2025-07-20T15:53:00
 6. Choose **Next**.
@@ -141,44 +229,12 @@ To launch the AWS CloudFormation template:
 When you choose **Create**, AWS CloudFormation creates the all of the backend components for the application. These include a Pinpoint Segment of ALL Endpoints, a Pinpoint Campaign that will run Daily, and two Lambda functions. This process takes about 5 minutes to complete.
 
 
-
-
-## OLD INFO BELOW ##
-#### Step 6: Create an Amazon Pinpoint campaign
-
-~~In the real world, you probably don't want to send messages to users immediately after they send tweets to your Twitter handle—if you did, you might seem too aggressive, and your customers might hesitate to engage with your brand in the future.~~
-
-Fortunately, you can use the campaign scheduling tools in Amazon Pinpoint to create a recurring campaign. When you create a recurring campaign, Amazon Pinpoint sends messages only to customers who meet certain criteria at campaign execution. Additionally, you can schedule your messages to be sent at a specific time in each recipient's time zone.
-
-*Important*: You have to obtain consent from your customers before you send messages to them.
-
-1. Log in to the AWS console, and then open the Amazon Pinpoint console at https://console.aws.amazon.com/pinpoint/home/?region=us-east-1.
-2. On the **Projects** page, choose the app **Salesforce Pinpoint Demo Application** that was automatically created from AWS CloudFormation.
-3. In the navigation pane, choose **Campaigns**, and then choose **Create a campaign**.
-4. For **Campaign name**, type a name for the campaign, and then choose **Next**.
-5. On the **Segment** page, do the following
-    1. Choose **Create a segment**.
-    2. For **Name your segment to reuse it later**, type a name for the segment.
-    3. In the **Add a filter** dropdown, select **Filter by endpoint**.
-    4. In the **Choose an endpoint attribute** choose
-    4. For **Filter by user attributes**, choose the plus sign (+) icon. Filter by segment to ~~include all endpoints where *Sentiment* is *Positive*~~, as shown in the following image:
-    ![Screenshot](images/pinpoint.png)
-    5. Choose **Next step**.
-
-
-6. On the **Message** page, type the message that you want to send, and then choose **Next step**. To learn more about writing mobile push messages, see [Writing a Mobile Push Message](https://docs.aws.amazon.com/pinpoint/latest/userguide/campaigns-message.html#campaigns-message-mobile) in the Amazon Pinpoint User Guide.
-7. On the **Schedule** page, choose the date and time when the message will be sent. You can also schedule the campaign to run on a recurring basis, such as every week. To learn more about scheduling campaigns, see [Set the Campaign Schedule](https://docs.aws.amazon.com/pinpoint/latest/userguide/campaigns-schedule.html) in the Amazon Pinpoint User Guide.~~
-
-
 ## Troubleshooting
-1. Push notifications aren't sending.
-    * Did you allow permissions for push notifications on the first app launch?
+1. CRM updates are not updating Amazon Pinpoint Endpoints.
     * Did the Kinesis producer script crash? Log into EC2 instance and view logs to troubleshoot.
-    * Sometimes, the Twitter Stream API decides not to monitor certain Twitter accounts. Twitter does not publish their criteria for which accounts are unmonitored and why. Create a new Twitter account and its tweets should show up on the stream.
-    * Did you have poor connectivity when you launched the app for the first time? Try force backgrounding/force quitting the app and restarting a few times.
-    * If all else fails, consult Apple's push notification troubleshooting guide [here](https://developer.apple.com/library/content/technotes/tn2265/_index.html).
-2. I'm getting more than one push!
-    * This can happen if the Lambda fails unexpectedly. Exceptions should be handled apppropriately but troubleshooting for this can be done within provided Lambda funciton.
+    * Did the AWS Lambda function error? Log into Amazon CloudWatch to view the detailed Lambda logs to troubleshoot.
+2. Amazon Pinpoint engagement data is not updating in Salesforce CRM.
+    * Did the AWS Lambda function error? Log into Amazon CloudWatch to view the detailed Lambda logs to troubleshoot.
 
 ## License Summary
 
